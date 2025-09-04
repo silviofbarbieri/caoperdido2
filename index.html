@@ -699,19 +699,29 @@
             }
         }
         
-        // Listener para mudanças no Firebase
-        dogsRef.on('value', (snapshot) => {
-            dogsData = snapshot.val() || {};
-            renderDogsList();
-        }, (error) => {
-            console.error('Erro ao carregar dados do Firebase:', error);
-            showError('Erro ao carregar dados do Firebase');
+        // Inicializar a aplicação quando a página carregar
+        window.addEventListener('load', function() {
+            console.log('Página carregada, inicializando Firebase...');
+            
+            // Aguardar um pouco para garantir que os scripts carregaram
+            setTimeout(() => {
+                if (typeof firebase !== 'undefined') {
+                    initializeFirebase();
+                } else {
+                    console.error('Firebase SDK não carregou');
+                    const statusDiv = document.getElementById('connection-status');
+                    statusDiv.textContent = 'Firebase SDK não carregou';
+                    statusDiv.className = 'connection-status disconnected';
+                    
+                    // Usar localStorage como fallback
+                    loadFromLocalStorage();
+                }
+            }, 1000);
         });
         
-        // Tratamento de erros do Firebase
-        dogsRef.on('error', (error) => {
-            console.error('Erro na conexão com Firebase:', error);
-            showError('Erro na conexão com o Firebase');
+        // Também tentar inicializar quando o DOM estiver pronto
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM carregado');
         });
     </script>
 </body>
