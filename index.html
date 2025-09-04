@@ -226,24 +226,8 @@
   		appId: "1:889692626070:web:9e42661eeb1a3b22a436b7"
         };
         
-        // Simulação de banco de dados com localStorage
-        function saveToLocalDB(data) {
-            // Obter dados existentes
-            let dogs = JSON.parse(localStorage.getItem('lostDogs') || '[]');
-            
-            // Adicionar novo registro
-            dogs.push(data);
-            
-            // Salvar de volta ao localStorage
-            localStorage.setItem('lostDogs', JSON.stringify(dogs));
-            
-            return Promise.resolve({ id: Date.now().toString() });
-        }
-        
-        function getFromLocalDB() {
-            return Promise.resolve(JSON.parse(localStorage.getItem('lostDogs') || '[]'));
-        }
-        
+       
+  
         // Troca de abas
         document.querySelectorAll('.tab').forEach(tab => {
             tab.addEventListener('click', () => {
