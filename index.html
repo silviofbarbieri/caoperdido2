@@ -53,6 +53,10 @@
         button:hover {
             background-color: #45a049;
         }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
         .dog-card {
             background-color: white;
             border-radius: 8px;
@@ -73,6 +77,13 @@
         }
         .btn-found:hover {
             background-color: #F57C00;
+        }
+        .btn-delete {
+            background-color: #f44336;
+            margin-top: 10px;
+        }
+        .btn-delete:hover {
+            background-color: #d32f2f;
         }
         .dog-status {
             position: absolute;
@@ -130,12 +141,36 @@
             border-radius: 4px;
             margin-bottom: 15px;
         }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+        .connection-status {
+            padding: 5px 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            text-align: center;
+            font-size: 12px;
+        }
+        .connection-status.connected {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .connection-status.disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
     </style>
 </head>
 <body>
     <div id="app">
         <div id="sidebar">
             <h1>Localizador de Cães Perdidos</h1>
+            
+            <div id="connection-status" class="connection-status">
+                Conectando ao Firebase...
+            </div>
             
             <div class="tabs">
                 <div class="tab active" data-tab="register">Cadastrar</div>
@@ -181,31 +216,63 @@
                         <input type="hidden" id="lng">
                     </div>
                     
-                    <button type="submit">Cadastrar Cão Perdido</button>
+                    <button type="submit" id="submit-btn">Cadastrar Cão Perdido</button>
                 </form>
             </div>
             
             <div id="list-tab" class="tab-content">
                 <h2>Todos os Cães</h2>
-                <div id="dogs-list"></div>
+                <div id="dogs-list">
+                    <div class="loading">Carregando dados do Firebase...</div>
+                </div>
             </div>
             
             <div id="lost-tab" class="tab-content">
                 <h2>Cães Perdidos</h2>
-                <div id="dogs-lost"></div>
+                <div id="dogs-lost">
+                    <div class="loading">Carregando dados do Firebase...</div>
+                </div>
             </div>
             
             <div id="found-tab" class="tab-content">
                 <h2>Cães Encontrados</h2>
-                <div id="dogs-found"></div>
+                <div id="dogs-found">
+                    <div class="loading">Carregando dados do Firebase...</div>
+                </div>
             </div>
         </div>
         
         <div id="map"></div>
     </div>
 
+    <!-- Firebase SDK -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/9.23.0/firebase-app-compat.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/9.23.0/firebase-database-compat.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/9.23.0/firebase-storage-compat.min.js"></script>
+    
+    <!-- Leaflet -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+    
     <script>
+        // Configuração do Firebase
+        const firebaseConfig = {
+            apiKey: "AIzaSyBC1N6flDlmnALeqWR3ma3VxO8xXbEIY2M",
+            authDomain: "fatecdmd-b8ca7.firebaseapp.com",
+            databaseURL: "https://fatecdmd-b8ca7-default-rtdb.firebaseio.com",
+            projectId: "fatecdmd-b8ca7",
+            storageBucket: "fatecdmd-b8ca7.firebasestorage.app",
+            messagingSenderId: "889692626070",
+            appId: "1:889692626070:web:9e42661eeb1a3b22a436b7"
+        };
+
+        // Inicializar Firebase
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+        const storage = firebase.storage();
+        
+        // Referência para os cães perdidos no database
+        const dogsRef = database.ref('lostDogs');
+        
         // Inicialização do mapa
         const map = L.map('map').setView([-23.5505, -46.6333], 13);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -215,19 +282,129 @@
         // Variáveis globais
         let selectedLocation = null;
         let markers = [];
+        let dogsData = {};
+        let isConnected = false;
         
-        // Firebase config - usando o Firebase Realtime Database como banco de dados gratuito
-        const firebaseConfig = {
-   		apiKey: "AIzaSyBC1N6flDlmnALeqWR3ma3VxO8xXbEIY2M",
-  		authDomain: "fatecdmd-b8ca7.firebaseapp.com",
-  		projectId: "fatecdmd-b8ca7",
-  		storageBucket: "fatecdmd-b8ca7.firebasestorage.app",
-  		messagingSenderId: "889692626070",
-  		appId: "1:889692626070:web:9e42661eeb1a3b22a436b7"
-        };
+        // Monitorar conexão com Firebase
+        const connectedRef = database.ref('.info/connected');
+        connectedRef.on('value', (snapshot) => {
+            const connected = snapshot.val();
+            const statusDiv = document.getElementById('connection-status');
+            
+            if (connected) {
+                statusDiv.textContent = 'Conectado ao Firebase';
+                statusDiv.className = 'connection-status connected';
+                isConnected = true;
+            } else {
+                statusDiv.textContent = 'Desconectado do Firebase';
+                statusDiv.className = 'connection-status disconnected';
+                isConnected = false;
+            }
+        });
         
-       
-  
+        // Função para mostrar mensagem de sucesso
+        function showSuccess(message) {
+            const successMsg = document.getElementById('success-message');
+            successMsg.textContent = message;
+            successMsg.style.display = 'block';
+            setTimeout(() => {
+                successMsg.style.display = 'none';
+            }, 5000);
+        }
+        
+        // Função para mostrar mensagem de erro
+        function showError(message) {
+            const errorMsg = document.getElementById('error-message');
+            errorMsg.textContent = message;
+            errorMsg.style.display = 'block';
+            setTimeout(() => {
+                errorMsg.style.display = 'none';
+            }, 5000);
+        }
+        
+        // Função para fazer upload da imagem para o Firebase Storage
+        async function uploadImage(file, dogId) {
+            const storageRef = storage.ref();
+            const imageRef = storageRef.child(`dogs/${dogId}/${file.name}`);
+            
+            try {
+                const snapshot = await imageRef.put(file);
+                const downloadURL = await snapshot.ref.getDownloadURL();
+                return downloadURL;
+            } catch (error) {
+                console.error('Erro no upload da imagem:', error);
+                throw new Error('Falha no upload da imagem');
+            }
+        }
+        
+        // Função para salvar cão no Firebase
+        async function saveDogToFirebase(dogData, imageFile) {
+            if (!isConnected) {
+                throw new Error('Não conectado ao Firebase');
+            }
+            
+            try {
+                // Gerar ID único para o cão
+                const dogKey = dogsRef.push().key;
+                
+                // Fazer upload da imagem
+                const imageUrl = await uploadImage(imageFile, dogKey);
+                
+                // Adicionar URL da imagem aos dados
+                dogData.image = imageUrl;
+                dogData.id = dogKey;
+                
+                // Salvar no Realtime Database
+                await dogsRef.child(dogKey).set(dogData);
+                
+                return { id: dogKey };
+            } catch (error) {
+                console.error('Erro ao salvar no Firebase:', error);
+                throw error;
+            }
+        }
+        
+        // Função para atualizar status do cão
+        async function updateDogStatus(dogId, found) {
+            if (!isConnected) {
+                throw new Error('Não conectado ao Firebase');
+            }
+            
+            try {
+                await dogsRef.child(dogId).update({ found: found });
+            } catch (error) {
+                console.error('Erro ao atualizar status:', error);
+                throw error;
+            }
+        }
+        
+        // Função para remover cão do Firebase
+        async function removeDogFromFirebase(dogId) {
+            if (!isConnected) {
+                throw new Error('Não conectado ao Firebase');
+            }
+            
+            try {
+                // Remover imagem do Storage (opcional)
+                const dog = dogsData[dogId];
+                if (dog && dog.image) {
+                    try {
+                        const imageRef = storage.refFromURL(dog.image);
+                        await imageRef.delete();
+                    } catch (imageError) {
+                        console.log('Erro ao deletar imagem:', imageError);
+                        // Continuar mesmo se a imagem não puder ser deletada
+                    }
+                }
+                
+                // Remover do Database
+                await dogsRef.child(dogId).remove();
+            } catch (error) {
+                console.error('Erro ao remover cão:', error);
+                throw error;
+            }
+        }
+        
         // Troca de abas
         document.querySelectorAll('.tab').forEach(tab => {
             tab.addEventListener('click', () => {
@@ -241,7 +418,7 @@
                 
                 // Se a aba for "listar", atualizar a lista
                 if (tab.dataset.tab === 'list') {
-                    loadDogs();
+                    renderDogsList();
                 }
             });
         });
@@ -266,31 +443,31 @@
             selectedLocation.bindPopup('Local selecionado').openPopup();
         });
         
-        // Função para converter imagem para Base64
-        function getBase64(file) {
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.readAsDataURL(file);
-                reader.onload = () => resolve(reader.result);
-                reader.onerror = error => reject(error);
-            });
-        }
-        
         // Envio do formulário
         document.getElementById('dog-form').addEventListener('submit', async function(e) {
             e.preventDefault();
             
-            const successMsg = document.getElementById('success-message');
-            const errorMsg = document.getElementById('error-message');
+            const submitBtn = document.getElementById('submit-btn');
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Salvando...';
             
             // Esconder mensagens anteriores
-            successMsg.style.display = 'none';
-            errorMsg.style.display = 'none';
+            document.getElementById('success-message').style.display = 'none';
+            document.getElementById('error-message').style.display = 'none';
+            
+            // Verificar conexão
+            if (!isConnected) {
+                showError('Não conectado ao Firebase. Verifique sua conexão com a internet.');
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Cadastrar Cão Perdido';
+                return;
+            }
             
             // Validar formulário
             if (!document.getElementById('lat').value || !document.getElementById('lng').value) {
-                errorMsg.textContent = "Por favor, selecione um local no mapa.";
-                errorMsg.style.display = 'block';
+                showError('Por favor, selecione um local no mapa.');
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Cadastrar Cão Perdido';
                 return;
             }
             
@@ -304,26 +481,22 @@
             const lng = parseFloat(document.getElementById('lng').value);
             
             try {
-                // Converter imagem para Base64
-                const imageBase64 = await getBase64(imageFile);
-                
                 // Preparar dados para salvar
                 const dogData = {
                     name: dogName,
                     breed: dogBreed,
                     description: dogDescription,
                     contactInfo: contactInfo,
-                    image: imageBase64,
                     location: {
                         lat: lat,
                         lng: lng
                     },
-                    timestamp: new Date().toISOString(),
-                    found: false // Status inicial: não encontrado
+                    timestamp: firebase.database.ServerValue.TIMESTAMP,
+                    found: false
                 };
                 
-                // Salvar no banco de dados
-                await saveToLocalDB(dogData);
+                // Salvar no Firebase
+                await saveDogToFirebase(dogData, imageFile);
                 
                 // Limpar formulário
                 document.getElementById('dog-form').reset();
@@ -336,20 +509,17 @@
                     selectedLocation = null;
                 }
                 
-                // Mostrar mensagem de sucesso
-                successMsg.textContent = "Cão cadastrado com sucesso!";
-                successMsg.style.display = 'block';
-                
-                // Atualizar mapa e lista
-                loadDogs();
+                showSuccess('Cão cadastrado com sucesso no Firebase!');
                 
                 // Mudar para a aba de listagem
                 document.querySelector('.tab[data-tab="list"]').click();
                 
             } catch (error) {
                 console.error("Erro ao cadastrar:", error);
-                errorMsg.textContent = "Erro ao cadastrar o cão. Tente novamente.";
-                errorMsg.style.display = 'block';
+                showError(`Erro ao cadastrar o cão: ${error.message}`);
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Cadastrar Cão Perdido';
             }
         });
         
@@ -381,7 +551,7 @@
         }
         
         // Função para mostrar card de cão na lista
-        function createDogCard(dog, index) {
+        function createDogCard(dog) {
             const dogCard = document.createElement('div');
             dogCard.className = 'dog-card';
             dogCard.style.position = 'relative';
@@ -398,8 +568,8 @@
                 <p>${dog.description.substring(0, 100)}${dog.description.length > 100 ? '...' : ''}</p>
                 <p><strong>Contato:</strong> ${dog.contactInfo}</p>
                 <button class="locate-btn" data-lat="${dog.location.lat}" data-lng="${dog.location.lng}">Localizar no Mapa</button>
-                ${!dog.found ? `<button class="btn-found" data-index="${index}">Marcar Como Encontrado</button>` : ''}
-                <button class="btn-delete" data-index="${index}" style="background-color: #f44336; margin-top: 10px;">Remover</button>
+                ${!dog.found ? `<button class="btn-found" data-id="${dog.id}">Marcar Como Encontrado</button>` : ''}
+                <button class="btn-delete" data-id="${dog.id}">Remover</button>
             `;
             
             // Adicionar evento ao botão de localizar
@@ -417,148 +587,132 @@
                 });
             });
             
-            // Adicionar evento ao botão "Marcar Como Encontrado" se não estiver encontrado
+            // Adicionar evento ao botão "Marcar Como Encontrado"
             if (!dog.found) {
-                dogCard.querySelector('.btn-found').addEventListener('click', function() {
-                    markDogAsFound(parseInt(this.dataset.index));
+                dogCard.querySelector('.btn-found').addEventListener('click', async function() {
+                    if (confirm("Confirmar que o cão foi encontrado?")) {
+                        const btn = this;
+                        btn.disabled = true;
+                        btn.textContent = 'Atualizando...';
+                        
+                        try {
+                            await updateDogStatus(this.dataset.id, true);
+                            showSuccess('Cão marcado como encontrado com sucesso!');
+                        } catch (error) {
+                            console.error('Erro ao atualizar status:', error);
+                            showError(`Erro ao atualizar status: ${error.message}`);
+                            btn.disabled = false;
+                            btn.textContent = 'Marcar Como Encontrado';
+                        }
+                    }
                 });
             }
             
             // Adicionar evento ao botão "Remover"
-            dogCard.querySelector('.btn-delete').addEventListener('click', function() {
-                removeDog(parseInt(this.dataset.index));
+            dogCard.querySelector('.btn-delete').addEventListener('click', async function() {
+                if (confirm("Tem certeza que deseja remover este cão do sistema?")) {
+                    const btn = this;
+                    btn.disabled = true;
+                    btn.textContent = 'Removendo...';
+                    
+                    try {
+                        await removeDogFromFirebase(this.dataset.id);
+                        showSuccess('Cão removido com sucesso!');
+                    } catch (error) {
+                        console.error('Erro ao remover cão:', error);
+                        showError(`Erro ao remover cão: ${error.message}`);
+                        btn.disabled = false;
+                        btn.textContent = 'Remover';
+                    }
+                }
             });
             
             return dogCard;
         }
         
-        // Função para marcar um cão como encontrado
-        function markDogAsFound(index) {
-            if (confirm("Confirmar que o cão foi encontrado?")) {
-                getFromLocalDB().then(dogs => {
-                    // Atualizar o status do cão
-                    dogs[index].found = true;
-                    
-                    // Salvar de volta ao localStorage
-                    localStorage.setItem('lostDogs', JSON.stringify(dogs));
-                    
-                    // Recarregar dados
-                    loadDogs();
-                    
-                    // Mostrar mensagem de sucesso
-                    const successMsg = document.getElementById('success-message');
-                    successMsg.textContent = "Cão marcado como encontrado com sucesso!";
-                    successMsg.style.display = 'block';
-                    
-                    // Esconder mensagem após 3 segundos
-                    setTimeout(() => {
-                        successMsg.style.display = 'none';
-                    }, 3000);
-                });
+        // Função para renderizar as listas
+        function renderDogsList() {
+            const dogsList = document.getElementById('dogs-list');
+            const dogsLost = document.getElementById('dogs-lost');
+            const dogsFound = document.getElementById('dogs-found');
+            
+            // Limpar listas
+            dogsList.innerHTML = '';
+            dogsLost.innerHTML = '';
+            dogsFound.innerHTML = '';
+            
+            // Limpar marcadores atuais
+            markers.forEach(marker => map.removeLayer(marker));
+            markers = [];
+            
+            const dogs = Object.values(dogsData);
+            
+            if (dogs.length === 0) {
+                dogsList.innerHTML = '<p>Nenhum cão cadastrado ainda.</p>';
+                dogsLost.innerHTML = '<p>Nenhum cão perdido registrado.</p>';
+                dogsFound.innerHTML = '<p>Nenhum cão encontrado registrado.</p>';
+                return;
             }
-        }
-        
-        // Função para remover um cão da lista
-        function removeDog(index) {
-            if (confirm("Tem certeza que deseja remover este cão do sistema?")) {
-                getFromLocalDB().then(dogs => {
-                    // Remover o cão da lista
-                    dogs.splice(index, 1);
-                    
-                    // Salvar de volta ao localStorage
-                    localStorage.setItem('lostDogs', JSON.stringify(dogs));
-                    
-                    // Recarregar dados
-                    loadDogs();
-                    
-                    // Mostrar mensagem de sucesso
-                    const successMsg = document.getElementById('success-message');
-                    successMsg.textContent = "Cão removido com sucesso!";
-                    successMsg.style.display = 'block';
-                    
-                    // Esconder mensagem após 3 segundos
-                    setTimeout(() => {
-                        successMsg.style.display = 'none';
-                    }, 3000);
-                });
-            }
-        }
-        
-        // Função para carregar cães do banco de dados
-        function loadDogs() {
-            getFromLocalDB().then(dogs => {
-                // Limpar marcadores atuais
-                markers.forEach(marker => map.removeLayer(marker));
-                markers = [];
-                
-                // Limpar todas as listas
-                const dogsList = document.getElementById('dogs-list');
-                const dogsLost = document.getElementById('dogs-lost');
-                const dogsFound = document.getElementById('dogs-found');
-                
-                dogsList.innerHTML = '';
-                dogsLost.innerHTML = '';
-                dogsFound.innerHTML = '';
-                
-                if (dogs.length === 0) {
-                    dogsList.innerHTML = '<p>Nenhum cão cadastrado ainda.</p>';
-                    dogsLost.innerHTML = '<p>Nenhum cão perdido registrado.</p>';
-                    dogsFound.innerHTML = '<p>Nenhum cão encontrado registrado.</p>';
-                    return;
+            
+            // Contadores para estatísticas
+            let lostCount = 0;
+            let foundCount = 0;
+            
+            // Adicionar cada cão ao mapa e às listas apropriadas
+            dogs.forEach((dog) => {
+                // Adicionar ao mapa (apenas se não estiver marcado como encontrado)
+                if (!dog.found) {
+                    const marker = createDogMarker(dog);
+                    markers.push(marker);
+                    lostCount++;
+                } else {
+                    foundCount++;
                 }
                 
-                // Contadores para estatísticas
-                let lostCount = 0;
-                let foundCount = 0;
+                // Adicionar à lista geral
+                const card = createDogCard(dog);
+                dogsList.appendChild(card);
                 
-                // Adicionar cada cão ao mapa e às listas apropriadas
-                dogs.forEach((dog, index) => {
-                    // Adicionar ao mapa (apenas se não estiver marcado como encontrado)
-                    if (!dog.found) {
-                        const marker = createDogMarker(dog);
-                        markers.push(marker);
-                        lostCount++;
-                    } else {
-                        foundCount++;
-                    }
-                    
-                    // Adicionar à lista geral
-                    const card = createDogCard(dog, index);
-                    dogsList.appendChild(card);
-                    
-                    // Adicionar à lista apropriada (perdidos ou encontrados)
-                    if (dog.found) {
-                        const foundCard = createDogCard(dog, index);
-                        dogsFound.appendChild(foundCard);
-                    } else {
-                        const lostCard = createDogCard(dog, index);
-                        dogsLost.appendChild(lostCard);
-                    }
-                });
-                
-                // Mostrar contadores
-                if (lostCount === 0) {
-                    dogsLost.innerHTML = '<p>Nenhum cão perdido registrado.</p>';
+                // Adicionar à lista apropriada (perdidos ou encontrados)
+                if (dog.found) {
+                    const foundCard = createDogCard(dog);
+                    dogsFound.appendChild(foundCard);
+                } else {
+                    const lostCard = createDogCard(dog);
+                    dogsLost.appendChild(lostCard);
                 }
-                
-                if (foundCount === 0) {
-                    dogsFound.innerHTML = '<p>Nenhum cão encontrado registrado.</p>';
-                }
-                
-                // Ajustar o mapa para mostrar todos os marcadores
-                if (markers.length > 0) {
-                    const group = L.featureGroup(markers);
-                    map.fitBounds(group.getBounds().pad(0.1));
-                }
-            }).catch(error => {
-                console.error("Erro ao carregar dados:", error);
-                document.getElementById('error-message').textContent = "Erro ao carregar cães perdidos.";
-                document.getElementById('error-message').style.display = 'block';
             });
+            
+            // Mostrar mensagens se não houver cães em uma categoria
+            if (lostCount === 0) {
+                dogsLost.innerHTML = '<p>Nenhum cão perdido registrado.</p>';
+            }
+            
+            if (foundCount === 0) {
+                dogsFound.innerHTML = '<p>Nenhum cão encontrado registrado.</p>';
+            }
+            
+            // Ajustar o mapa para mostrar todos os marcadores
+            if (markers.length > 0) {
+                const group = L.featureGroup(markers);
+                map.fitBounds(group.getBounds().pad(0.1));
+            }
         }
         
-        // Carregar cães ao iniciar a aplicação
-        loadDogs();
+        // Listener para mudanças no Firebase
+        dogsRef.on('value', (snapshot) => {
+            dogsData = snapshot.val() || {};
+            renderDogsList();
+        }, (error) => {
+            console.error('Erro ao carregar dados do Firebase:', error);
+            showError('Erro ao carregar dados do Firebase');
+        });
+        
+        // Tratamento de erros do Firebase
+        dogsRef.on('error', (error) => {
+            console.error('Erro na conexão com Firebase:', error);
+            showError('Erro na conexão com o Firebase');
+        });
     </script>
 </body>
 </html>
